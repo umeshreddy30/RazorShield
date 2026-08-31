@@ -30,6 +30,30 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
 
+# ---------------------------------------------------------------------------
+# Backward-compatible Platt calibration helper
+# sklearn >= 1.6 deprecated cv='prefit'; sklearn >= 1.9 removed it entirely.
+# FrozenEstimator (introduced in 1.6) is the correct replacement.
+# This wrapper works on sklearn 1.3-1.5 (old) AND 1.6+ (new/cloud).
+# ---------------------------------------------------------------------------
+try:
+    from sklearn.frozen import FrozenEstimator as _FrozenEstimator
+
+    def _calibrate(estimator, X_val, y_val, method="sigmoid"):
+        """Calibrate a pre-fitted estimator (sklearn >= 1.6 path)."""
+        calib = CalibratedClassifierCV(_FrozenEstimator(estimator), method=method)
+        calib.fit(X_val, y_val)
+        return calib
+
+except ImportError:
+    # sklearn < 1.6 — cv='prefit' still works
+    def _calibrate(estimator, X_val, y_val, method="sigmoid"):  # type: ignore[misc]
+        """Calibrate a pre-fitted estimator (legacy sklearn < 1.6 path)."""
+        calib = CalibratedClassifierCV(estimator, method=method, cv="prefit")
+        calib.fit(X_val, y_val)
+        return calib
+
+
 ROOT_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT_DIR / "src"))
 
@@ -69,8 +93,7 @@ def _train_logistic_regression(
     )
     lr.fit(Xtr, y_train)
 
-    calib = CalibratedClassifierCV(lr, method="sigmoid", cv="prefit")
-    calib.fit(Xvl, y_val)
+    calib = _calibrate(lr, Xvl, y_val)
 
     return {
         "model":        calib,
@@ -101,8 +124,7 @@ def _train_random_forest(
     )
     rf.fit(X_train, y_train)
 
-    calib = CalibratedClassifierCV(rf, method="sigmoid", cv="prefit")
-    calib.fit(X_val, y_val)
+    calib = _calibrate(rf, X_val, y_val)
 
     return {
         "model":        calib,
@@ -143,8 +165,7 @@ def _train_lightgbm(
     )
     lgb_model.fit(X_train, y_train)
 
-    calib = CalibratedClassifierCV(lgb_model, method="sigmoid", cv="prefit")
-    calib.fit(X_val, y_val)
+    calib = _calibrate(lgb_model, X_val, y_val)
 
     return {
         "model":        calib,
