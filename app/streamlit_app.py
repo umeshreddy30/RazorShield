@@ -15,14 +15,15 @@ Run:
 
 from __future__ import annotations
 
+import importlib
 import json
+import shutil
 import sys
 import time
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
@@ -31,6 +32,18 @@ import streamlit as st
 # ---------------------------------------------------------------------------
 ROOT_DIR = Path(__file__).resolve().parent.parent
 SRC_DIR  = ROOT_DIR / "src"
+
+# ---------------------------------------------------------------------------
+# CRITICAL: purge stale __pycache__ so Streamlit Cloud never runs
+# old bytecode after a code update.  Safe to run on every restart.
+# ---------------------------------------------------------------------------
+for _pycache in ROOT_DIR.rglob("__pycache__"):
+    try:
+        shutil.rmtree(_pycache, ignore_errors=True)
+    except Exception:
+        pass
+
+# Now insert src/ into path and import
 sys.path.insert(0, str(SRC_DIR))
 
 # ---------------------------------------------------------------------------
