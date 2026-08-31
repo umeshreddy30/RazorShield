@@ -25,33 +25,72 @@ from pathlib import Path
 
 import numpy as np
 import yaml
-from sklearn.calibration import CalibratedClassifierCV
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
 
 # ---------------------------------------------------------------------------
-# Backward-compatible Platt calibration helper
-# sklearn >= 1.6 deprecated cv='prefit'; sklearn >= 1.9 removed it entirely.
-# FrozenEstimator (introduced in 1.6) is the correct replacement.
-# This wrapper works on sklearn 1.3-1.5 (old) AND 1.6+ (new/cloud).
+# Manual Platt calibration — completely sklearn-version-independent.
+# Replaces CalibratedClassifierCV to avoid breaking API changes across
+# sklearn versions (1.3 / 1.6 / 1.9 all handle cv='prefit' differently).
+#
+# Platt scaling: fit a 1-parameter sigmoid f(s) = 1/(1+exp(A*s + B))
+# on the raw probability scores from the pre-trained model.
+# Identical in behaviour to CalibratedClassifierCV(method='sigmoid').
 # ---------------------------------------------------------------------------
-try:
-    from sklearn.frozen import FrozenEstimator as _FrozenEstimator
 
-    def _calibrate(estimator, X_val, y_val, method="sigmoid"):
-        """Calibrate a pre-fitted estimator (sklearn >= 1.6 path)."""
-        calib = CalibratedClassifierCV(_FrozenEstimator(estimator), method=method)
-        calib.fit(X_val, y_val)
-        return calib
+class _PlattCalibratedModel:
+    """
+    Wraps a pre-fitted sklearn estimator with Platt (sigmoid) calibration.
+    Uses scipy's L-BFGS-B to fit the sigmoid — no CalibratedClassifierCV.
+    """
 
-except ImportError:
-    # sklearn < 1.6 — cv='prefit' still works
-    def _calibrate(estimator, X_val, y_val, method="sigmoid"):  # type: ignore[misc]
-        """Calibrate a pre-fitted estimator (legacy sklearn < 1.6 path)."""
-        calib = CalibratedClassifierCV(estimator, method=method, cv="prefit")
-        calib.fit(X_val, y_val)
-        return calib
+    def __init__(self, base_estimator):
+        self._base = base_estimator
+        self._A: float = 1.0
+        self._B: float = 0.0
+
+    # ── fit on held-out validation set ──────────────────────────────────────
+    def fit(self, X_val: np.ndarray, y_val: np.ndarray) -> "_PlattCalibratedModel":
+        from scipy.optimize import minimize
+
+        raw = self._base.predict_proba(X_val)[:, 1].astype(np.float64)
+
+        def _nll(params: np.ndarray) -> float:
+            A, B = float(params[0]), float(params[1])
+            p = 1.0 / (1.0 + np.exp(np.clip(A * raw + B, -500, 500)))
+            p = np.clip(p, 1e-9, 1 - 1e-9)
+            return float(-np.mean(
+                y_val * np.log(p) + (1.0 - y_val) * np.log(1.0 - p)
+            ))
+
+        result = minimize(
+            _nll, x0=np.array([1.0, 0.0]),
+            method="L-BFGS-B",
+            options={"maxiter": 500, "ftol": 1e-10},
+        )
+        self._A, self._B = float(result.x[0]), float(result.x[1])
+        return self
+
+    # ── inference ───────────────────────────────────────────────────────────
+    def predict_proba(self, X: np.ndarray) -> np.ndarray:
+        raw = self._base.predict_proba(X)[:, 1].astype(np.float64)
+        cal = 1.0 / (1.0 + np.exp(np.clip(self._A * raw + self._B, -500, 500)))
+        cal = np.clip(cal, 1e-9, 1 - 1e-9)
+        return np.column_stack([1.0 - cal, cal])
+
+    def predict(self, X: np.ndarray) -> np.ndarray:
+        return (self.predict_proba(X)[:, 1] >= 0.5).astype(int)
+
+
+def _calibrate(
+    estimator,
+    X_val: np.ndarray,
+    y_val: np.ndarray,
+) -> _PlattCalibratedModel:
+    """Calibrate a pre-fitted estimator using manual Platt scaling."""
+    return _PlattCalibratedModel(estimator).fit(X_val, y_val)
+
 
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
