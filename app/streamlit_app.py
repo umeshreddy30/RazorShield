@@ -216,7 +216,7 @@ PLOTLY_LAYOUT = dict(
 def _run_pipeline(config: dict) -> None:
     """Run data generation + training + evaluation in-process."""
     from data_generator import generate_and_save
-    from train import train_all_models
+    from train_v2 import train_all_models
     from evaluate import evaluate_on_split
 
     st.info("⚙️ Generating synthetic dataset (50,000 orders)…")

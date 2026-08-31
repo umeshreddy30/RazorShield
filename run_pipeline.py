@@ -50,7 +50,7 @@ def main() -> None:
     print(" Step 2/4  Train Models (LR + RF + LightGBM)")
     print("="*60)
     t0 = time.time()
-    from train import train_all_models
+    from train_v2 import train_all_models
     train_all_models(config)
     print(f"[pipeline] Done in {time.time()-t0:.1f}s")
 
