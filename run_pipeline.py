@@ -72,9 +72,11 @@ def main() -> None:
         evaluate_on_split("test", config)
         print(f"[pipeline] Done in {time.time()-t0:.1f}s")
 
-    print("\nPipeline complete! Run the dashboard with:")
-    print("   streamlit run app/streamlit_app.py\n")
+    print("\nPipeline complete! Start RazorShield with:")
+    print("   1. Backend: python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000")
+    print("   2. Frontend: cd frontend && npm run dev (http://localhost:3000)\n")
 
 
 if __name__ == "__main__":
     main()
+

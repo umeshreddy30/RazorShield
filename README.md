@@ -144,7 +144,6 @@ razorshield/
 │
 ├── models/                        # Pre-trained ML artifacts (XGBoost, Encoders, LightGBM)
 ├── data/                          # Dataset schemas & processed splits
-├── app/                           # Alternative Streamlit app (with Agent Investigation tab)
 └── requirements.txt               # Unified Python dependencies (LangGraph, FastAPI, etc.)
 ```
 
@@ -214,7 +213,7 @@ Investigation Duration: ~540 ms
 
 - **Next.js Frontend**: Deploy directly to [Vercel](https://vercel.com) by connecting your GitHub repo.
 - **FastAPI Backend**: Deploy to [Render](https://render.com), [Railway](https://railway.app), or AWS EC2 using `uvicorn backend.main:app --host 0.0.0.0 --port $PORT`.
-- **Streamlit Alternative**: Deploy directly to [Streamlit Cloud](https://share.streamlit.io) with main file path `app/streamlit_app.py`.
+
 
 ---
 
