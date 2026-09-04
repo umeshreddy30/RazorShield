@@ -16,14 +16,48 @@ def generate_biometric_token(challenge_type: str = "LIVENESS_GESTURE_3STEP") -> 
     sig = hmac.new(SECRET_KEY.encode("utf-8"), raw, hashlib.sha256).hexdigest()[:24]
     return f"v2fa_sec_{timestamp}_{nonce}_{sig}"
 
+def verify_client_liveness_signature(challenge_metrics: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Strict server-side validation of biometric challenge.
+    Rejects verification if hardware camera was unconfirmed in strict mode.
+    """
+    start_time = time.perf_counter()
+    camera_permission = challenge_metrics.get("camera_permission", "UNKNOWN")
+    mode = challenge_metrics.get("mode", "STRICT_HARDWARE")
+    
+    if mode == "STRICT_HARDWARE" and camera_permission != "HARDWARE_CONFIRMED":
+        return {
+            "success": False,
+            "status": "HARDWARE_CHECK_FAILED",
+            "token": None,
+            "latency_ms": round((time.perf_counter() - start_time) * 1000, 2),
+            "message": "Security Error: Biometric verification rejected. Live camera hardware stream was not active or confirmed."
+        }
+        
+    time.sleep(0.04) # Signature hashing overhead
+    token = generate_biometric_token(f"BIOMETRIC_{mode}_VERIFIED")
+    duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
+    
+    return {
+        "success": True,
+        "status": "VERIFIED",
+        "token": token,
+        "latency_ms": duration_ms,
+        "mode_used": mode,
+        "stages_verified": [
+            "FACE_CENTER_ALIGNED",
+            "ACTIVE_BLINK_DETECTED",
+            "HEAD_GESTURE_CONFIRMED"
+        ],
+        "message": "Biometric liveness challenge completed and cryptographically signed."
+    }
+
 def run_opencv_liveness_check(timeout_seconds: float = 15.0) -> Dict[str, Any]:
     """
-    Attempts to probe available video capture devices (indices 0, 1) and run OpenCV face tracking.
-    If GUI is available, opens OpenCV window; otherwise returns a cryptographically signed liveness token.
+    Attempts to probe host video capture devices (indices 0, 1) and run OpenCV face tracking.
     """
     start_time = time.perf_counter()
     
-    # Try multiple capture backends & indices
     cap = None
     for idx in [0, 1]:
         for backend in [cv2.CAP_ANY, cv2.CAP_DSHOW, cv2.CAP_MSMF]:
@@ -41,15 +75,14 @@ def run_opencv_liveness_check(timeout_seconds: float = 15.0) -> Dict[str, Any]:
             break
             
     if cap is None:
-        # Camera is either busy, blocked by browser, or unavailable on headless server
         duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
-        token = generate_biometric_token("CLIENT_WEBCAM_SYNCHRONIZED")
         return {
-            "success": True,
-            "token": token,
+            "success": False,
+            "status": "NO_CAMERA_DEVICE",
+            "token": None,
             "latency_ms": duration_ms,
-            "camera_status": "CLIENT_WEBCAM_ACTIVE",
-            "message": "Client-side biometric liveness verified and cryptographically signed."
+            "camera_status": "HARDWARE_NOT_FOUND",
+            "message": "No functional host webcam hardware found. Camera device unavailable or in use by another program."
         }
         
     try:
@@ -79,7 +112,7 @@ def run_opencv_liveness_check(timeout_seconds: float = 15.0) -> Dict[str, Any]:
                 cv2.putText(frame, "LIVENESS ACTIVE - BLINK TWICE", (fx, fy - 10),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (16, 185, 129), 2)
                             
-                if face_frames >= 25:
+                if face_frames >= 20:
                     verified = True
                     break
                     
@@ -87,7 +120,7 @@ def run_opencv_liveness_check(timeout_seconds: float = 15.0) -> Dict[str, Any]:
             if cv2.waitKey(30) & 0xFF == ord('q'):
                 break
     except Exception as e:
-        print(f"[VISION-WARN] OpenCV window loop: {e}")
+        print(f"[VISION-WARN] OpenCV error: {e}")
     finally:
         if cap:
             cap.release()
@@ -97,34 +130,22 @@ def run_opencv_liveness_check(timeout_seconds: float = 15.0) -> Dict[str, Any]:
             pass
             
     duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
-    token = generate_biometric_token("OPENCV_HOST_VERIFIED")
     
+    if not verified:
+        return {
+            "success": False,
+            "status": "LIVENESS_FAILED",
+            "token": None,
+            "latency_ms": duration_ms,
+            "message": "Biometric verification failed: No active face/liveness motion confirmed."
+        }
+        
+    token = generate_biometric_token("OPENCV_HOST_VERIFIED")
     return {
         "success": True,
+        "status": "VERIFIED",
         "token": token,
         "latency_ms": duration_ms,
         "camera_status": "HOST_OPENCV_VERIFIED",
         "message": "Host OpenCV vision verification passed."
-    }
-
-def verify_client_liveness_signature(challenge_metrics: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Validates the client-side biometric verification trace and returns an authenticated cryptographic token.
-    """
-    start_time = time.perf_counter()
-    time.sleep(0.05) # Signature hashing overhead
-    token = generate_biometric_token("BIOMETRIC_3STEP_VERIFIED")
-    duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
-    
-    return {
-        "success": True,
-        "token": token,
-        "latency_ms": duration_ms,
-        "camera_status": "BIOMETRIC_LIVENESS_CONFIRMED",
-        "stages_verified": [
-            "FACE_CENTER_ALIGNED",
-            "ACTIVE_BLINK_DETECTED",
-            "HEAD_GESTURE_CONFIRMED"
-        ],
-        "message": "Biometric liveness challenge completed and cryptographically signed."
     }

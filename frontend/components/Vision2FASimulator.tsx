@@ -2,7 +2,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Camera, Eye, ShieldCheck, RefreshCw, CheckCircle2, Lock, Zap, Loader2, Video, AlertCircle } from 'lucide-react';
+import { Camera, Eye, ShieldCheck, RefreshCw, CheckCircle2, Lock, Zap, Loader2, Video, AlertCircle, AlertTriangle, XCircle, Sliders } from 'lucide-react';
 
 interface Vision2FASimulatorProps {
   apiUrl?: string;
@@ -15,16 +15,18 @@ export default function Vision2FASimulator({
   const [isScanning, setIsScanning] = useState<boolean>(false);
   const [livenessProgress, setLivenessProgress] = useState<number>(0);
   const [statusMessage, setStatusMessage] = useState<string>('Webcam biometric challenge standing by.');
-  const [cameraPermission, setCameraPermission] = useState<'IDLE' | 'GRANTED' | 'DENIED'>('IDLE');
+  const [cameraMode, setCameraMode] = useState<'STRICT_HARDWARE' | 'DEMO_EMULATED'>('STRICT_HARDWARE');
+  const [cameraStatus, setCameraStatus] = useState<'IDLE' | 'ACTIVE' | 'FAILED'>('IDLE');
   const [verificationResult, setVerificationResult] = useState<{
     status: 'IDLE' | 'VERIFIED' | 'FAILED';
-    token?: string;
+    token?: string | null;
     latencyMs?: number;
     message?: string;
   }>({ status: 'IDLE' });
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const stepTimersRef = useRef<NodeJS.Timeout[]>([]);
 
   const challenges = [
     { step: 1, text: 'Center face in the biometric frame', icon: '👤', instruction: 'Align your face inside the central reticle' },
@@ -32,71 +34,114 @@ export default function Vision2FASimulator({
     { step: 3, text: 'Turn head slightly or nod to verify 3D depth', icon: '🔄', instruction: 'Slight head movement confirms 3D depth profile' },
   ];
 
-  // Stop camera stream on unmount
+  const clearTimers = () => {
+    stepTimersRef.current.forEach((t) => clearTimeout(t));
+    stepTimersRef.current = [];
+  };
+
+  const stopCamera = () => {
+    clearTimers();
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+    }
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+  };
+
   useEffect(() => {
-    return () => {
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach((t) => t.stop());
-      }
-    };
+    return () => stopCamera();
   }, []);
 
-  const startRealWebcamLiveness = async () => {
+  const startVerification = async () => {
+    stopCamera();
     setVerificationResult({ status: 'IDLE' });
     setLivenessProgress(5);
     setChallengeStep(1);
     setIsScanning(true);
-    setStatusMessage('Accessing local camera hardware...');
+    setStatusMessage('Checking laptop camera hardware...');
 
     let localStream: MediaStream | null = null;
+    let cameraWorks = false;
 
-    try {
-      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-        localStream = await navigator.mediaDevices.getUserMedia({
-          video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' }
-        });
-        streamRef.current = localStream;
-        if (videoRef.current) {
-          videoRef.current.srcObject = localStream;
-          videoRef.current.play();
+    if (cameraMode === 'STRICT_HARDWARE') {
+      try {
+        if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+          localStream = await navigator.mediaDevices.getUserMedia({
+            video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' }
+          });
+
+          // Verify video track is alive and producing frames
+          const videoTrack = localStream.getVideoTracks()[0];
+          if (videoTrack && videoTrack.readyState === 'live') {
+            streamRef.current = localStream;
+            if (videoRef.current) {
+              videoRef.current.srcObject = localStream;
+              await videoRef.current.play();
+            }
+            cameraWorks = true;
+            setCameraStatus('ACTIVE');
+            setStatusMessage('Stage 1: Live camera detected. Center face in reticle.');
+          }
         }
-        setCameraPermission('GRANTED');
-        setStatusMessage('Stage 1: Center face inside the reticle.');
-      } else {
-        setCameraPermission('DENIED');
+      } catch (err: any) {
+        console.warn('Hardware camera access failed:', err);
+        setCameraStatus('FAILED');
+        setIsScanning(false);
+        setLivenessProgress(0);
+        setVerificationResult({
+          status: 'FAILED',
+          token: null,
+          latencyMs: 45.0,
+          message: 'Hardware Error: No working webcam stream found on this machine. Biometric verification failed.'
+        });
+        setStatusMessage('❌ Camera Hardware Error: Camera failed or permission was denied. Biometric verification rejected.');
+        return;
       }
-    } catch (err) {
-      console.warn('Browser camera access notice:', err);
-      setCameraPermission('DENIED');
-      setStatusMessage('Camera access unavailable. Using hardware acceleration bridge...');
+
+      if (!cameraWorks) {
+        setCameraStatus('FAILED');
+        setIsScanning(false);
+        setLivenessProgress(0);
+        setVerificationResult({
+          status: 'FAILED',
+          token: null,
+          latencyMs: 30.0,
+          message: 'Camera stream inactive. Verification aborted for security.'
+        });
+        setStatusMessage('❌ Verification Aborted: Hardware camera not producing frames.');
+        return;
+      }
+    } else {
+      // Demo Emulated Mode
+      setCameraStatus('ACTIVE');
+      setStatusMessage('🧪 Demo Mode: Simulating biometric landmark alignment...');
     }
 
-    // Interactive Stage Progression (User performs each real biometric challenge)
-    // Stage 1 (0-3s): Face Centering
-    setTimeout(() => {
+    // Interactive Stage Progression
+    const t1 = setTimeout(() => {
       setChallengeStep(2);
-      setLivenessProgress(40);
+      setLivenessProgress(45);
       setStatusMessage('Stage 2: Please blink your eyes twice.');
-    }, 2400);
+    }, 2500);
 
-    // Stage 2 (3-6s): Blink / Active Liveness
-    setTimeout(() => {
+    const t2 = setTimeout(() => {
       setChallengeStep(3);
-      setLivenessProgress(75);
-      setStatusMessage('Stage 3: Turn head slightly left or nod for 3D depth check.');
-    }, 4800);
+      setLivenessProgress(80);
+      setStatusMessage('Stage 3: Turn head slightly left or nod for 3D depth.');
+    }, 5000);
 
-    // Stage 3 (6-8s): Server-side Cryptographic Handshake
-    setTimeout(async () => {
-      setStatusMessage('Signing biometric proof with FastAPI cryptographic engine...');
-      setLivenessProgress(90);
+    const t3 = setTimeout(async () => {
+      setStatusMessage('Cryptographically signing biometric proof with FastAPI...');
+      setLivenessProgress(95);
 
       try {
         const payload = {
           source: 'client_biometric_challenge',
-          challenge_type: '3STEP_LIVENESS_PULSE',
-          client_timestamp: Date.now(),
-          camera_permission: cameraPermission === 'GRANTED' ? 'HARDWARE_CONFIRMED' : 'EMULATED'
+          mode: cameraMode,
+          camera_permission: cameraWorks ? 'HARDWARE_CONFIRMED' : (cameraMode === 'DEMO_EMULATED' ? 'EMULATED' : 'FAILED'),
+          client_timestamp: Date.now()
         };
 
         const res = await fetch(`${apiUrl}/api/trigger-liveness`, {
@@ -108,38 +153,46 @@ export default function Vision2FASimulator({
 
         setLivenessProgress(100);
         setIsScanning(false);
-        setVerificationResult({
-          status: 'VERIFIED',
-          token: data.token || `v2fa_sec_${Date.now()}_signed`,
-          latencyMs: data.latency_ms || 142.0,
-          message: data.message || 'Biometric Liveness Verified & Cryptographically Signed.'
-        });
-        setStatusMessage('Biometric Liveness Passed & Token Issued.');
-      } catch (e) {
-        setLivenessProgress(100);
+
+        if (data.success) {
+          setVerificationResult({
+            status: 'VERIFIED',
+            token: data.token,
+            latencyMs: data.latency_ms || 120.0,
+            message: data.message || 'Biometric Liveness Verified & Cryptographically Signed.'
+          });
+          setStatusMessage('✅ Biometric Liveness Passed & HMAC Signed Token Issued.');
+        } else {
+          setVerificationResult({
+            status: 'FAILED',
+            token: null,
+            latencyMs: data.latency_ms || 50.0,
+            message: data.message || 'Verification rejected by risk engine.'
+          });
+          setStatusMessage('❌ Verification Failed: ' + (data.message || 'Security check failed.'));
+        }
+      } catch (err) {
         setIsScanning(false);
+        setLivenessProgress(0);
         setVerificationResult({
-          status: 'VERIFIED',
-          token: `v2fa_sec_${Date.now()}_local_sig`,
-          latencyMs: 140.0,
-          message: 'Biometric verification complete.'
+          status: 'FAILED',
+          token: null,
+          latencyMs: 0,
+          message: 'Backend verification gateway unreachable.'
         });
-        setStatusMessage('Biometric verification passed.');
+        setStatusMessage('❌ Network Error: Could not reach verification API.');
       }
-    }, 7200);
+    }, 7500);
+
+    stepTimersRef.current = [t1, t2, t3];
   };
 
   const resetChallenge = () => {
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((t) => t.stop());
-      streamRef.current = null;
-    }
-    if (videoRef.current) {
-      videoRef.current.srcObject = null;
-    }
+    stopCamera();
     setIsScanning(false);
     setLivenessProgress(0);
     setChallengeStep(1);
+    setCameraStatus('IDLE');
     setVerificationResult({ status: 'IDLE' });
     setStatusMessage('Webcam biometric challenge standing by.');
   };
@@ -157,37 +210,75 @@ export default function Vision2FASimulator({
               Vision-Based 2FA & Liveness Verification
               <span className="text-[10px] px-2 py-0.5 rounded bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 font-mono">FEATURE 2</span>
             </h2>
-            <p className="text-[11px] text-slate-400">Real-Time Facial Landmark & Gesture Liveness Challenge with Signed HMAC Token</p>
+            <p className="text-[11px] text-slate-400">Strict Hardware Biometric Landmark & Gesture Verification</p>
           </div>
         </div>
 
-        <div className="flex items-center space-x-2">
-          {verificationResult.status === 'VERIFIED' && (
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Mode Selector */}
+          <div className="flex items-center bg-[#070A12] border border-slate-800 rounded-lg p-1 text-[11px] font-mono">
+            <button
+              onClick={() => { setCameraMode('STRICT_HARDWARE'); resetChallenge(); }}
+              className={`px-2.5 py-1 rounded transition-all flex items-center gap-1 ${
+                cameraMode === 'STRICT_HARDWARE' ? 'bg-cyan-600 text-white font-bold' : 'text-slate-400 hover:text-slate-200'
+              }`}
+              title="Requires active laptop webcam"
+            >
+              <Camera className="h-3 w-3" />
+              <span>Strict Camera Mode</span>
+            </button>
+            <button
+              onClick={() => { setCameraMode('DEMO_EMULATED'); resetChallenge(); }}
+              className={`px-2.5 py-1 rounded transition-all flex items-center gap-1 ${
+                cameraMode === 'DEMO_EMULATED' ? 'bg-amber-600 text-white font-bold' : 'text-slate-400 hover:text-slate-200'
+              }`}
+              title="For testing on devices without working cameras"
+            >
+              <Sliders className="h-3 w-3" />
+              <span>Demo Mode</span>
+            </button>
+          </div>
+
+          {verificationResult.status !== 'IDLE' && (
             <button
               onClick={resetChallenge}
               className="flex items-center space-x-1 text-slate-400 hover:text-white px-3 py-1.5 rounded-lg text-xs bg-slate-800/80 transition-colors"
             >
               <RefreshCw className="h-3.5 w-3.5" />
-              <span>Reset Challenge</span>
+              <span>Reset</span>
             </button>
           )}
 
           <button
-            onClick={startRealWebcamLiveness}
+            onClick={startVerification}
             disabled={isScanning}
-            className="flex items-center space-x-1.5 bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 text-white px-4 py-2 rounded-lg text-xs font-semibold shadow-md shadow-cyan-600/20 transition-colors"
+            className={`flex items-center space-x-1.5 text-white px-4 py-2 rounded-lg text-xs font-semibold shadow-md transition-colors ${
+              cameraMode === 'STRICT_HARDWARE'
+                ? 'bg-cyan-600 hover:bg-cyan-500 shadow-cyan-600/20'
+                : 'bg-amber-600 hover:bg-amber-500 shadow-amber-600/20'
+            } disabled:opacity-50`}
           >
             {isScanning ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Camera className="h-3.5 w-3.5" />}
-            <span>{isScanning ? 'Verifying Live Gestures...' : 'Trigger 2FA Liveness Check'}</span>
+            <span>{isScanning ? 'Verifying Live Stream...' : 'Trigger 2FA Liveness Check'}</span>
           </button>
         </div>
       </div>
+
+      {/* Mode Warning Banner */}
+      {cameraMode === 'DEMO_EMULATED' && (
+        <div className="bg-amber-950/40 border-b border-amber-500/30 px-4 py-1.5 text-[11px] text-amber-300 flex items-center justify-between font-mono">
+          <span className="flex items-center gap-1.5">
+            <AlertTriangle className="h-3.5 w-3.5 text-amber-400" />
+            DEMO EMULATION MODE ACTIVE: Simulates biometric gesture pipeline for testing on laptops without working cameras.
+          </span>
+          <span className="text-[10px] opacity-70">For production, switch to Strict Camera Mode.</span>
+        </div>
+      )}
 
       {/* Main Grid: Live Biometric Viewfinder + Challenge Checklist */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 p-6 items-center">
         {/* Live Camera Viewfinder Frame */}
         <div className="relative aspect-video bg-[#070A12] rounded-xl border-2 border-cyan-500/30 flex flex-col items-center justify-center overflow-hidden p-2 shadow-inner">
-          {/* Background grid */}
           <div className="absolute inset-0 bg-grid-pattern opacity-15" />
 
           {/* Real Live HTML5 Webcam Stream */}
@@ -197,7 +288,7 @@ export default function Vision2FASimulator({
             muted
             autoPlay
             className={`absolute inset-0 w-full h-full object-cover transform -scale-x-100 ${
-              cameraPermission === 'GRANTED' ? 'opacity-90' : 'hidden'
+              cameraStatus === 'ACTIVE' && cameraMode === 'STRICT_HARDWARE' ? 'opacity-90' : 'hidden'
             }`}
           />
 
@@ -212,14 +303,18 @@ export default function Vision2FASimulator({
           {/* Biometric Oval Landmark HUD */}
           <div
             className={`relative z-10 h-44 w-36 rounded-[50%] border-2 transition-all flex flex-col items-center justify-center backdrop-blur-[1px] ${
-              isScanning
-                ? 'border-cyan-400 shadow-[0_0_25px_rgba(6,182,212,0.4)] animate-pulse'
+              verificationResult.status === 'FAILED'
+                ? 'border-rose-500 bg-rose-500/20 shadow-[0_0_30px_rgba(239,68,68,0.4)]'
                 : verificationResult.status === 'VERIFIED'
                 ? 'border-emerald-400 bg-emerald-500/20 shadow-[0_0_30px_rgba(16,185,129,0.4)]'
+                : isScanning
+                ? 'border-cyan-400 shadow-[0_0_25px_rgba(6,182,212,0.4)] animate-pulse'
                 : 'border-slate-700 bg-black/40'
             }`}
           >
-            {verificationResult.status === 'VERIFIED' ? (
+            {verificationResult.status === 'FAILED' ? (
+              <XCircle className="h-12 w-12 text-rose-400" />
+            ) : verificationResult.status === 'VERIFIED' ? (
               <CheckCircle2 className="h-12 w-12 text-emerald-400" />
             ) : isScanning ? (
               <div className="text-center px-2">
@@ -231,18 +326,20 @@ export default function Vision2FASimulator({
             ) : (
               <div className="text-center text-slate-500">
                 <Video className="h-8 w-8 mx-auto mb-1" />
-                <span className="text-[10px] font-mono">READY</span>
+                <span className="text-[10px] font-mono">{cameraMode === 'STRICT_HARDWARE' ? 'HARDWARE READY' : 'DEMO READY'}</span>
               </div>
             )}
           </div>
 
           {/* Dynamic Status Text Bar */}
-          <div className="mt-3 text-center z-20 bg-[#0B0F19]/90 border border-slate-800 px-4 py-1.5 rounded-full backdrop-blur-md">
-            <span className="text-xs font-mono text-cyan-300 font-semibold flex items-center justify-center gap-1.5">
+          <div className="mt-3 text-center z-20 bg-[#0B0F19]/90 border border-slate-800 px-4 py-1.5 rounded-full backdrop-blur-md max-w-[90%]">
+            <span className={`text-xs font-mono font-semibold flex items-center justify-center gap-1.5 ${
+              verificationResult.status === 'FAILED' ? 'text-rose-400' : 'text-cyan-300'
+            }`}>
               {isScanning && <Loader2 className="h-3 w-3 animate-spin text-cyan-400" />}
-              {isScanning ? challenges[challengeStep - 1].instruction : verificationResult.status === 'VERIFIED' ? 'BIOMETRIC LIVENESS CONFIRMED' : 'CAMERA HARDWARE STANDBY'}
+              {verificationResult.status === 'FAILED' ? 'HARDWARE VERIFICATION FAILED' : isScanning ? challenges[challengeStep - 1].instruction : 'BIOMETRIC SCANNER READY'}
             </span>
-            <p className="text-[10px] text-slate-400 mt-0.5">{statusMessage}</p>
+            <p className="text-[10px] text-slate-400 mt-0.5 truncate">{statusMessage}</p>
           </div>
         </div>
 
@@ -254,7 +351,7 @@ export default function Vision2FASimulator({
                 Biometric Challenge Pipeline
               </span>
               <span className="text-[10px] font-mono text-slate-500">
-                {isScanning ? `Progress: ${livenessProgress}%` : verificationResult.status === 'VERIFIED' ? '100% Verified' : 'Standby'}
+                {isScanning ? `Progress: ${livenessProgress}%` : verificationResult.status === 'VERIFIED' ? '100% Passed' : verificationResult.status === 'FAILED' ? 'Aborted' : 'Standby'}
               </span>
             </div>
 
@@ -262,21 +359,24 @@ export default function Vision2FASimulator({
             <div className="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden">
               <div
                 className={`h-full transition-all duration-300 ${
-                  verificationResult.status === 'VERIFIED' ? 'bg-emerald-500' : 'bg-cyan-500'
+                  verificationResult.status === 'FAILED' ? 'bg-rose-500' : verificationResult.status === 'VERIFIED' ? 'bg-emerald-500' : 'bg-cyan-500'
                 }`}
                 style={{ width: `${livenessProgress}%` }}
               />
             </div>
 
             {challenges.map((c) => {
-              const isCompleted = challengeStep > c.step || verificationResult.status === 'VERIFIED';
+              const isCompleted = (challengeStep > c.step && verificationResult.status !== 'FAILED') || verificationResult.status === 'VERIFIED';
               const isActive = challengeStep === c.step && isScanning;
+              const isFailed = verificationResult.status === 'FAILED' && challengeStep === c.step;
 
               return (
                 <div
                   key={c.step}
                   className={`p-3 rounded-lg border flex items-center justify-between transition-all ${
-                    isCompleted
+                    isFailed
+                      ? 'bg-rose-950/30 border-rose-500/50 text-rose-300'
+                      : isCompleted
                       ? 'bg-emerald-950/20 border-emerald-500/40 text-emerald-300'
                       : isActive
                       ? 'bg-cyan-950/40 border-cyan-400 text-cyan-100 shadow-[0_0_15px_rgba(6,182,212,0.15)] ring-1 ring-cyan-500/40'
@@ -292,9 +392,16 @@ export default function Vision2FASimulator({
                           ▶ Active prompt: Perform action now
                         </span>
                       )}
+                      {isFailed && (
+                        <span className="text-[10px] text-rose-400 font-mono block mt-0.5">
+                          ✖ Hardware check failed at this step
+                        </span>
+                      )}
                     </div>
                   </div>
-                  {isCompleted ? (
+                  {isFailed ? (
+                    <XCircle className="h-4 w-4 text-rose-400" />
+                  ) : isCompleted ? (
                     <CheckCircle2 className="h-4 w-4 text-emerald-400" />
                   ) : isActive ? (
                     <Loader2 className="h-4 w-4 text-cyan-400 animate-spin" />
@@ -306,7 +413,24 @@ export default function Vision2FASimulator({
             })}
           </div>
 
-          {/* Cryptographic Token Output */}
+          {/* Failed State Card */}
+          {verificationResult.status === 'FAILED' && (
+            <div className="p-3.5 rounded-lg bg-rose-950/30 border border-rose-500/50 space-y-1 font-mono text-[11px] text-rose-300 animate-in fade-in duration-300">
+              <div className="flex items-center justify-between font-bold">
+                <span className="flex items-center gap-1.5">
+                  <XCircle className="h-4 w-4 text-rose-400" />
+                  BIOMETRIC 2FA REJECTED
+                </span>
+                <span className="text-[10px] text-rose-400/80">{verificationResult.latencyMs}ms</span>
+              </div>
+              <p className="text-[10px] font-sans opacity-90">{verificationResult.message}</p>
+              <p className="text-[9px] text-slate-400 pt-1">
+                Tip: If your laptop camera is broken or in use by another app, switch to <strong>"Demo Mode"</strong> above to test the multi-agent challenge flow.
+              </p>
+            </div>
+          )}
+
+          {/* Successful Cryptographic Token Output */}
           {verificationResult.status === 'VERIFIED' && (
             <div className="p-3.5 rounded-lg bg-emerald-950/30 border border-emerald-500/50 space-y-1.5 font-mono text-[11px] text-emerald-300 animate-in fade-in duration-300">
               <div className="flex items-center justify-between font-bold">
@@ -320,7 +444,7 @@ export default function Vision2FASimulator({
                 {verificationResult.token}
               </div>
               <div className="text-[9px] text-emerald-400/70 pt-0.5">
-                🔒 Cryptographically signed by RazorShield FastAPI Auth Mesh. Handshake ready for settlement capture.
+                🔒 Cryptographically signed by RazorShield FastAPI Auth Mesh ({cameraMode}).
               </div>
             </div>
           )}
