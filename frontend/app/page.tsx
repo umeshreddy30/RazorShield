@@ -22,6 +22,17 @@ import Vision2FASimulator from '@/components/Vision2FASimulator';
 
 export default function RazorShieldCommandCenter() {
   const [activeTab, setActiveTab] = useState<'AGENTS' | 'GRAPH' | 'FEED' | 'VISION'>('AGENTS');
+  const [latestSubgraph, setLatestSubgraph] = useState<any>(null);
+  const [latestScenario, setLatestScenario] = useState<string>('SYNDICATE_ATTACK');
+
+  const handleInvestigationComplete = (subgraph: any, scenario: string) => {
+    if (subgraph) {
+      setLatestSubgraph(subgraph);
+    }
+    if (scenario) {
+      setLatestScenario(scenario);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-[#070A12] bg-grid-pattern text-slate-100 font-sans selection:bg-blue-600 selection:text-white">
@@ -133,13 +144,13 @@ export default function RazorShieldCommandCenter() {
         {/* Dynamic Tab Render */}
         {activeTab === 'AGENTS' && (
           <div className="space-y-6">
-            <AgentExecutionTerminal />
+            <AgentExecutionTerminal onInvestigationComplete={handleInvestigationComplete} />
           </div>
         )}
 
         {activeTab === 'GRAPH' && (
           <div className="space-y-6">
-            <FraudRingGraph />
+            <FraudRingGraph dynamicSubgraph={latestSubgraph} currentScenario={latestScenario} />
           </div>
         )}
 

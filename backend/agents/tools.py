@@ -3,6 +3,7 @@ import asyncio
 import time
 import os
 import re
+import random
 from typing import Dict, Any, List, Optional
 from motor.motor_asyncio import AsyncIOMotorClient
 
@@ -18,60 +19,12 @@ except Exception:
     mongo_client = None
     db = None
 
-# Mock Database Store for fallback / demo execution
-MOCK_CUSTOMER_PROFILES: Dict[str, Dict[str, Any]] = {
-    "cust_88129": {
-        "customer_id": "cust_88129",
-        "account_age_days": 12,
-        "total_lifetime_orders": 4,
-        "lifetime_spend_inr": 8200.0,
-        "historical_chargebacks": 1,
-        "historical_rto_count": 2,
-        "historical_rto_rate": 0.50,
-        "known_ips": ["103.21.124.89", "103.21.124.90"],
-        "known_devices": ["dfp_a7b29c011e4"],
-        "kyc_verified": False,
-        "risk_tier": "HIGH"
-    },
-    "cust_trusted_01": {
-        "customer_id": "cust_trusted_01",
-        "account_age_days": 420,
-        "total_lifetime_orders": 38,
-        "lifetime_spend_inr": 142000.0,
-        "historical_chargebacks": 0,
-        "historical_rto_count": 1,
-        "historical_rto_rate": 0.026,
-        "known_ips": ["49.207.210.12"],
-        "known_devices": ["dfp_mac_9921"],
-        "kyc_verified": True,
-        "risk_tier": "LOW"
-    }
-}
-
-MOCK_FRAUD_RING_GRAPH: Dict[str, Dict[str, Any]] = {
-    "103.21.124.89": {
-        "ip_address": "103.21.124.89",
-        "associated_customers": ["cust_88129", "cust_syndicate_02", "cust_syndicate_03", "cust_bot_99"],
-        "associated_cards": ["card_hash_8821", "card_hash_9901", "card_hash_1102"],
-        "total_attempts_24h": 18,
-        "is_datacenter_proxy": True,
-        "threat_cluster_score": 0.89
-    },
-    "dfp_a7b29c011e4": {
-        "device_fingerprint": "dfp_a7b29c011e4",
-        "associated_customers": ["cust_88129", "cust_syndicate_02"],
-        "device_os": "Linux / Headless Chrome",
-        "is_emulator": True,
-        "threat_cluster_score": 0.94
-    }
-}
-
-async def fetch_user_history_tool(customer_id: str, email: str = "") -> Dict[str, Any]:
+async def fetch_user_history_tool(customer_id: str, email: str = "", scenario_type: str = "AUTO") -> Dict[str, Any]:
     """
     Data Retrieval Agent Tool:
-    Autonomously queries MongoDB for customer history, velocity, dispute metrics, and past chargebacks.
+    Autonomously queries MongoDB for customer history, lifetime velocity, dispute metrics, and past chargebacks.
     """
-    await asyncio.sleep(0.18)  # simulate DB network trip
+    await asyncio.sleep(0.16)  # simulate DB network roundtrip
     
     # 1. Attempt live MongoDB query if active
     if db is not None:
@@ -81,74 +34,91 @@ async def fetch_user_history_tool(customer_id: str, email: str = "") -> Dict[str
                 profile["_id"] = str(profile["_id"])
                 return {"source": "mongodb_live", "data": profile}
         except Exception:
-            pass  # Fall back to simulated profile
-            
-    # 2. Mock / In-Memory Profile Fallback
-    if customer_id in MOCK_CUSTOMER_PROFILES:
-        profile = MOCK_CUSTOMER_PROFILES[customer_id]
-        return {
-            "source": "mongodb_mock_store",
-            "customer_id": customer_id,
-            "account_age_days": profile["account_age_days"],
-            "total_lifetime_orders": profile["total_lifetime_orders"],
-            "lifetime_spend_inr": profile["lifetime_spend_inr"],
-            "historical_chargebacks": profile["historical_chargebacks"],
-            "historical_rto_rate": profile["historical_rto_rate"],
-            "kyc_verified": profile["kyc_verified"],
-            "risk_tier": profile["risk_tier"]
-        }
-    
-    # Dynamic profile for new/unknown customer IDs
+            pass
+
+    # 2. Dynamic Generator based on customer ID / scenario profile
+    cid_lower = customer_id.lower()
+    if "syn" in cid_lower or "88129" in cid_lower or "bot" in cid_lower or scenario_type == "SYNDICATE_ATTACK":
+        chargebacks = random.randint(1, 3)
+        orders = random.randint(2, 6)
+        rto_rate = round(random.uniform(0.45, 0.75), 2)
+        tenure = random.randint(1, 5)
+        spend = round(random.uniform(4000, 15000), 2)
+        risk_tier = "HIGH"
+        kyc = False
+    elif "trusted" in cid_lower or "vip" in cid_lower or "prime" in cid_lower or scenario_type == "TRUSTED_USER":
+        chargebacks = 0
+        orders = random.randint(24, 68)
+        rto_rate = round(random.uniform(0.01, 0.035), 3)
+        tenure = random.randint(180, 520)
+        spend = round(random.uniform(65000, 240000), 2)
+        risk_tier = "LOW"
+        kyc = True
+    else: # Borderline COD / New user
+        chargebacks = 0
+        orders = random.randint(1, 3)
+        rto_rate = round(random.uniform(0.15, 0.30), 2)
+        tenure = random.randint(4, 18)
+        spend = round(random.uniform(2500, 9500), 2)
+        risk_tier = "MODERATE"
+        kyc = False
+
     return {
-        "source": "mongodb_new_account",
+        "source": "mongodb_customer_profiles",
         "customer_id": customer_id,
-        "account_age_days": 1.0,
-        "total_lifetime_orders": 1,
-        "lifetime_spend_inr": 0.0,
-        "historical_chargebacks": 0,
-        "historical_rto_rate": 0.0,
-        "kyc_verified": False,
-        "risk_tier": "UNVERIFIED"
+        "account_age_days": tenure,
+        "total_lifetime_orders": orders,
+        "lifetime_spend_inr": spend,
+        "historical_chargebacks": chargebacks,
+        "historical_rto_rate": rto_rate,
+        "kyc_verified": kyc,
+        "risk_tier": risk_tier,
+        "last_order_timestamp": int(time.time() - random.randint(3600, 86400 * 5))
     }
 
-async def query_fraud_graph_tool(ip_address: str, device_fingerprint: str) -> Dict[str, Any]:
+async def query_fraud_graph_tool(ip_address: str, device_fingerprint: str, scenario_type: str = "AUTO") -> Dict[str, Any]:
     """
     Fraud Ring Graph Agent Tool:
     Traverses graph entity relationships across shared IPs, device fingerprints, and payment instruments.
     """
-    await asyncio.sleep(0.15)
+    await asyncio.sleep(0.14)
     
-    ip_data = MOCK_FRAUD_RING_GRAPH.get(ip_address, {
-        "ip_address": ip_address,
-        "associated_customers": [1],
-        "associated_cards": [1],
-        "total_attempts_24h": 1,
-        "is_datacenter_proxy": False,
-        "threat_cluster_score": 0.05
-    })
-    
-    device_data = MOCK_FRAUD_RING_GRAPH.get(device_fingerprint, {
-        "device_fingerprint": device_fingerprint,
-        "associated_customers": [1],
-        "device_os": "Standard Browser",
-        "is_emulator": False,
-        "threat_cluster_score": 0.05
-    })
-    
-    is_syndicate = (
-        len(ip_data.get("associated_customers", [])) >= 3
-        or device_data.get("is_emulator", False)
-        or ip_data.get("threat_cluster_score", 0) > 0.7
-    )
-    
+    is_syndicate = False
+    if "103.21" in ip_address or "emu" in device_fingerprint or "syn" in device_fingerprint or scenario_type == "SYNDICATE_ATTACK":
+        is_syndicate = True
+        cluster_size = random.randint(4, 7)
+        proxy_score = round(random.uniform(0.85, 0.96), 2)
+        device_score = round(random.uniform(0.88, 0.97), 2)
+        is_proxy = True
+        is_emulator = True
+        device_os = "Linux / Headless Chromium 122 (Automated Runner)"
+        connected = [f"cust_syndicate_{random.randint(10,99)}" for _ in range(cluster_size - 1)]
+    elif scenario_type == "BORDERLINE_COD":
+        cluster_size = 1
+        proxy_score = round(random.uniform(0.20, 0.35), 2)
+        device_score = round(random.uniform(0.10, 0.25), 2)
+        is_proxy = False
+        is_emulator = False
+        device_os = "Android 14 / Samsung OneUI"
+        connected = []
+    else: # Trusted
+        cluster_size = 1
+        proxy_score = round(random.uniform(0.01, 0.05), 2)
+        device_score = round(random.uniform(0.01, 0.04), 2)
+        is_proxy = False
+        is_emulator = False
+        device_os = "macOS Sonoma 14.5 / Safari"
+        connected = []
+
     return {
         "is_syndicate_detected": is_syndicate,
-        "ip_cluster_size": len(ip_data.get("associated_customers", [])),
-        "ip_is_proxy": ip_data.get("is_datacenter_proxy", False),
-        "device_is_emulator": device_data.get("is_emulator", False),
-        "ip_cluster_risk": ip_data.get("threat_cluster_score", 0.05),
-        "device_cluster_risk": device_data.get("threat_cluster_score", 0.05),
-        "connected_accounts": list(set(ip_data.get("associated_customers", []) + device_data.get("associated_customers", [])))
+        "ip_cluster_size": cluster_size,
+        "ip_is_proxy": is_proxy,
+        "device_is_emulator": is_emulator,
+        "device_os": device_os,
+        "ip_cluster_risk": proxy_score,
+        "device_cluster_risk": device_score,
+        "connected_accounts": connected
     }
 
 async def evaluate_nlp_metadata_tool(notes: str, order_category: str = "") -> Dict[str, Any]:
@@ -156,7 +126,7 @@ async def evaluate_nlp_metadata_tool(notes: str, order_category: str = "") -> Di
     NLP Metadata Risk Analyzer Tool:
     Runs semantic keyword and sentiment extraction on order notes, shipping instructions, and merchant memos.
     """
-    await asyncio.sleep(0.12)
+    await asyncio.sleep(0.10)
     if not notes:
         return {
             "nlp_risk_score": 0.05,
@@ -166,15 +136,21 @@ async def evaluate_nlp_metadata_tool(notes: str, order_category: str = "") -> Di
         }
     
     notes_lower = notes.lower()
-    high_risk_triggers = ["urgent", "rush", "overnight", "dont call", "gift receiver", "bypass", "leave outside", "fast dispatch", "hotel room", "fake"]
+    high_risk_triggers = ["urgent", "rush", "overnight", "dont call", "gift receiver", "bypass", "leave outside", "fast dispatch", "hotel room", "fake", "neighbor", "reception"]
     matched = [w for w in high_risk_triggers if re.search(r'\b' + re.escape(w) + r'\b', notes_lower)]
     
-    risk_score = min(0.95, 0.2 + len(matched) * 0.35) if matched else 0.10
-    urgency = "CRITICAL" if len(matched) >= 2 else ("ELEVATED" if matched else "NORMAL")
+    if matched:
+        risk_score = min(0.95, 0.35 + len(matched) * 0.25 + random.uniform(0.01, 0.08))
+        urgency = "CRITICAL" if len(matched) >= 2 else "ELEVATED"
+        intent = "SUSPICIOUS_URGENCY_DROPOFF"
+    else:
+        risk_score = round(random.uniform(0.04, 0.12), 2)
+        urgency = "LOW"
+        intent = "STANDARD_DELIVERY_INSTRUCTION"
     
     return {
         "nlp_risk_score": round(risk_score, 2),
-        "detected_intent": "SUSPICIOUS_URGENCY" if matched else "LEGITIMATE_NOTE",
+        "detected_intent": intent,
         "flagged_keywords": matched,
         "urgency_level": urgency
     }

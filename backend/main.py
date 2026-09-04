@@ -114,6 +114,7 @@ class TransactionPayload(BaseModel):
     device_fingerprint: Optional[str] = Field(default="dfp_a7b29c011e4", example="dfp_a7b29c011e4")
     order_category: Optional[str] = Field(default="ELECTRONICS", example="ELECTRONICS")
     notes: Optional[str] = Field(default="", example="Urgent overnight courier please")
+    scenario_type: Optional[str] = Field(default="AUTO", example="SYNDICATE_ATTACK")
 
 class ScoringResponse(BaseModel):
     transaction_id: str

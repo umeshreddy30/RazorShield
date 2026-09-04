@@ -19,21 +19,25 @@ export interface AgentFrame {
 interface AgentExecutionTerminalProps {
   wsUrl?: string;
   apiUrl?: string;
+  onInvestigationComplete?: (subgraph: any, scenario: string) => void;
 }
 
 export default function AgentExecutionTerminal({
   wsUrl = process.env.NEXT_PUBLIC_WS_AGENT_URL || 'ws://localhost:8000/ws/investigate',
-  apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+  apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000',
+  onInvestigationComplete
 }: AgentExecutionTerminalProps) {
   const [logs, setLogs] = useState<AgentFrame[]>([]);
   const [isConnected, setIsConnected] = useState<boolean>(false);
   const [isInvestigating, setIsInvestigating] = useState<boolean>(false);
+  const [activeScenario, setActiveScenario] = useState<string | null>(null);
   const [autoScroll, setAutoScroll] = useState<boolean>(true);
   const [activeVerdict, setActiveVerdict] = useState<{
     verdict: string;
     riskScore: number;
     summary: string;
     txnId: string;
+    scenario?: string;
   } | null>(null);
 
   const terminalEndRef = useRef<HTMLDivElement>(null);
@@ -71,7 +75,8 @@ export default function AgentExecutionTerminal({
                 verdict: frame.data.verdict,
                 riskScore: frame.data.composite_risk_score,
                 summary: frame.data.executive_summary,
-                txnId: frame.transaction_id || 'N/A'
+                txnId: frame.transaction_id || 'N/A',
+                scenario: frame.data.scenario
               });
               setIsInvestigating(false);
             }
@@ -101,34 +106,92 @@ export default function AgentExecutionTerminal({
     };
   }, [wsUrl]);
 
-  // Trigger autonomous investigation
-  const triggerInvestigation = async (isFraudCase = true) => {
+  // Trigger dynamic autonomous investigation by scenario archetype
+  const triggerInvestigation = async (scenario: 'SYNDICATE_ATTACK' | 'BORDERLINE_COD' | 'TRUSTED_USER') => {
     setIsInvestigating(true);
+    setActiveScenario(scenario);
     setActiveVerdict(null);
-    try {
-      const payload = {
-        transaction_id: `txn_${Date.now()}_${Math.floor(Math.random() * 900 + 100)}`,
-        merchant_id: 'mer_enterprise_prime',
-        customer_id: isFraudCase ? 'cust_88129' : 'cust_trusted_01',
-        amount: isFraudCase ? 48500.0 : 3200.0,
-        account_age_days: isFraudCase ? 2.0 : 280.0,
-        device_trust_score: isFraudCase ? 0.18 : 0.92,
-        ip_velocity_1h: isFraudCase ? 6 : 1,
-        txn_velocity_1h: isFraudCase ? 8 : 1,
-        is_vpn_proxy: isFraudCase,
-        failed_attempts_24h: isFraudCase ? 4 : 0,
-        billing_shipping_match: !isFraudCase,
-        customer_email: isFraudCase ? 'syndicate_actor@tempmail.com' : 'priya.sharma@gmail.com',
-        ip_address: isFraudCase ? '103.21.124.89' : '49.207.210.12',
-        device_fingerprint: isFraudCase ? 'dfp_a7b29c011e4' : 'dfp_mac_9921',
-        notes: isFraudCase ? 'Urgent rush dispatch, leave with reception desk' : 'Standard courier delivery'
-      };
 
-      await fetch(`${apiUrl}/api/v1/investigate`, {
+    let payload: any;
+    const randSuffix = Math.floor(Math.random() * 900 + 100);
+    const txnId = `txn_${Date.now()}_${randSuffix}`;
+
+    if (scenario === 'SYNDICATE_ATTACK') {
+      payload = {
+        transaction_id: txnId,
+        merchant_id: 'mer_enterprise_prime',
+        customer_id: `cust_syn_${Math.floor(Math.random() * 80 + 10)}`,
+        amount: Math.round((Math.random() * 35000 + 35000) * 100) / 100, // ₹35,000 - ₹70,000
+        account_age_days: Math.round(Math.random() * 3 * 10) / 10,
+        device_trust_score: Math.round((Math.random() * 0.20 + 0.05) * 100) / 100,
+        ip_velocity_1h: Math.floor(Math.random() * 5 + 5),
+        txn_velocity_1h: Math.floor(Math.random() * 6 + 6),
+        is_vpn_proxy: true,
+        failed_attempts_24h: Math.floor(Math.random() * 3 + 3),
+        billing_shipping_match: false,
+        customer_email: `syndicate_actor_${randSuffix}@tempmail.org`,
+        ip_address: `103.21.${Math.floor(Math.random() * 200 + 10)}.${Math.floor(Math.random() * 250 + 1)}`,
+        device_fingerprint: `dfp_emu_linux_${randSuffix}`,
+        notes: 'Urgent rush express dispatch! Do not call phone, drop with security guard immediately.',
+        scenario_type: 'SYNDICATE_ATTACK',
+        order_category: 'ELECTRONICS'
+      };
+    } else if (scenario === 'BORDERLINE_COD') {
+      payload = {
+        transaction_id: txnId,
+        merchant_id: 'mer_retail_direct',
+        customer_id: `cust_cod_first_${randSuffix}`,
+        amount: Math.round((Math.random() * 4000 + 4500) * 100) / 100, // ₹4,500 - ₹8,500
+        account_age_days: Math.round(Math.random() * 12 + 2),
+        device_trust_score: Math.round((Math.random() * 0.25 + 0.45) * 100) / 100,
+        ip_velocity_1h: 2,
+        txn_velocity_1h: 1,
+        is_vpn_proxy: false,
+        failed_attempts_24h: 1,
+        billing_shipping_match: true,
+        customer_email: `rahul.sharma.${randSuffix}@gmail.com`,
+        ip_address: `157.34.${Math.floor(Math.random() * 180 + 10)}.${Math.floor(Math.random() * 250 + 1)}`,
+        device_fingerprint: `dfp_android_samsung_${randSuffix}`,
+        notes: 'Cash on delivery. Call 10 minutes before arriving at home address.',
+        scenario_type: 'BORDERLINE_COD',
+        order_category: 'FASHION_APPAREL'
+      };
+    } else {
+      // TRUSTED_USER
+      payload = {
+        transaction_id: txnId,
+        merchant_id: 'mer_enterprise_prime',
+        customer_id: `cust_vip_ananya_${randSuffix}`,
+        amount: Math.round((Math.random() * 3000 + 1200) * 100) / 100, // ₹1,200 - ₹4,200
+        account_age_days: Math.round(Math.random() * 300 + 180),
+        device_trust_score: Math.round((Math.random() * 0.08 + 0.91) * 100) / 100,
+        ip_velocity_1h: 1,
+        txn_velocity_1h: 1,
+        is_vpn_proxy: false,
+        failed_attempts_24h: 0,
+        billing_shipping_match: true,
+        customer_email: `ananya.deshmukh.${randSuffix}@gmail.com`,
+        ip_address: `49.207.${Math.floor(Math.random() * 180 + 10)}.${Math.floor(Math.random() * 250 + 1)}`,
+        device_fingerprint: `dfp_mac_safari_${randSuffix}`,
+        notes: 'Standard registered delivery to residential address.',
+        scenario_type: 'TRUSTED_USER',
+        order_category: 'BOOKS_ESSENTIALS'
+      };
+    }
+
+    try {
+      const resp = await fetch(`${apiUrl}/api/v1/investigate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
+
+      if (resp.ok) {
+        const result = await resp.json();
+        if (result?.evidence_breakdown?.subgraph && onInvestigationComplete) {
+          onInvestigationComplete(result.evidence_breakdown.subgraph, scenario);
+        }
+      }
     } catch (e) {
       console.error('Failed to trigger investigation:', e);
       setIsInvestigating(false);
@@ -155,7 +218,7 @@ export default function AgentExecutionTerminal({
   return (
     <div className="w-full bg-[#0B0F19] text-slate-100 rounded-xl border border-slate-800 shadow-2xl overflow-hidden font-sans">
       {/* Top Header Bar */}
-      <div className="bg-[#111827] px-4 py-3 border-b border-slate-800 flex flex-wrap justify-between items-center gap-3">
+      <div className="bg-[#111827] px-4 py-3 border-b border-slate-800 flex flex-col md:flex-row md:items-center justify-between gap-3">
         <div className="flex items-center space-x-3">
           <div className="h-8 w-8 rounded-lg bg-gradient-to-tr from-indigo-600 to-cyan-500 flex items-center justify-center shadow-md shadow-indigo-500/20">
             <Terminal className="h-4 w-4 text-white" />
@@ -165,11 +228,11 @@ export default function AgentExecutionTerminal({
               Autonomous Agent Investigation Terminal
               <span className="text-[10px] px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 font-mono">LANGGRAPH CORE</span>
             </h2>
-            <p className="text-[11px] text-slate-400">Live Agent Reasoning, Tool Execution & State Machine Stream</p>
+            <p className="text-[11px] text-slate-400">Dynamic Multi-Agent Reasoning, Tool Execution & State Machine Stream</p>
           </div>
         </div>
 
-        {/* Action Controls */}
+        {/* Live Status + Clear button */}
         <div className="flex items-center space-x-2">
           <div className={`flex items-center space-x-1.5 text-[11px] px-2.5 py-1 rounded-full border font-mono ${
             isConnected ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' : 'bg-rose-500/10 border-rose-500/30 text-rose-400'
@@ -179,29 +242,56 @@ export default function AgentExecutionTerminal({
           </div>
 
           <button
-            onClick={() => triggerInvestigation(true)}
-            disabled={isInvestigating}
-            className="flex items-center space-x-1.5 bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white px-3 py-1.5 rounded-lg text-xs font-semibold shadow-md shadow-rose-600/20 transition-colors"
-          >
-            <Play className="h-3.5 w-3.5" />
-            <span>Investigate Syndicate Case</span>
-          </button>
-
-          <button
-            onClick={() => triggerInvestigation(false)}
-            disabled={isInvestigating}
-            className="flex items-center space-x-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white px-3 py-1.5 rounded-lg text-xs font-semibold shadow-md shadow-blue-600/20 transition-colors"
-          >
-            <Play className="h-3.5 w-3.5" />
-            <span>Investigate Legitimate Case</span>
-          </button>
-
-          <button
-            onClick={() => { setLogs([]); setActiveVerdict(null); }}
+            onClick={() => { setLogs([]); setActiveVerdict(null); setActiveScenario(null); }}
             className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-lg transition-colors"
             title="Clear Logs"
           >
             <Trash2 className="h-4 w-4" />
+          </button>
+        </div>
+      </div>
+
+      {/* 3 Dynamic Scenario Action Controls */}
+      <div className="bg-[#0D1424] px-4 py-3 border-b border-slate-800/80 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center space-x-2 text-xs text-slate-400 font-mono">
+          <span>SELECT DEMO SCENARIO:</span>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2.5">
+          {/* Button 1: Syndicate Attack */}
+          <button
+            onClick={() => triggerInvestigation('SYNDICATE_ATTACK')}
+            disabled={isInvestigating}
+            className="flex items-center space-x-2 bg-gradient-to-r from-rose-700 to-rose-600 hover:from-rose-600 hover:to-rose-500 disabled:opacity-50 text-white px-3.5 py-1.5 rounded-lg text-xs font-semibold shadow-md shadow-rose-900/30 transition-all border border-rose-500/30 active:scale-95"
+          >
+            <span className="h-2 w-2 rounded-full bg-rose-300 animate-pulse" />
+            <Play className="h-3.5 w-3.5 fill-current" />
+            <span>Simulate Syndicate Attack</span>
+            <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-black/40 text-rose-200 ml-1">HIGH RISK</span>
+          </button>
+
+          {/* Button 2: Borderline COD */}
+          <button
+            onClick={() => triggerInvestigation('BORDERLINE_COD')}
+            disabled={isInvestigating}
+            className="flex items-center space-x-2 bg-gradient-to-r from-amber-700 to-amber-600 hover:from-amber-600 hover:to-amber-500 disabled:opacity-50 text-white px-3.5 py-1.5 rounded-lg text-xs font-semibold shadow-md shadow-amber-900/30 transition-all border border-amber-500/30 active:scale-95"
+          >
+            <span className="h-2 w-2 rounded-full bg-amber-300 animate-pulse" />
+            <Play className="h-3.5 w-3.5 fill-current" />
+            <span>Simulate Borderline COD</span>
+            <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-black/40 text-amber-200 ml-1">TRIGGER 2FA</span>
+          </button>
+
+          {/* Button 3: Clean Order */}
+          <button
+            onClick={() => triggerInvestigation('TRUSTED_USER')}
+            disabled={isInvestigating}
+            className="flex items-center space-x-2 bg-gradient-to-r from-emerald-700 to-emerald-600 hover:from-emerald-600 hover:to-emerald-500 disabled:opacity-50 text-white px-3.5 py-1.5 rounded-lg text-xs font-semibold shadow-md shadow-emerald-900/30 transition-all border border-emerald-500/30 active:scale-95"
+          >
+            <span className="h-2 w-2 rounded-full bg-emerald-300 animate-pulse" />
+            <Play className="h-3.5 w-3.5 fill-current" />
+            <span>Simulate Clean Order</span>
+            <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-black/40 text-emerald-200 ml-1">APPROVE</span>
           </button>
         </div>
       </div>
