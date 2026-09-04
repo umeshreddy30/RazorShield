@@ -4,12 +4,22 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
-from data_generator import generate_synthetic_orders
-from preprocessing import (
-    CATEGORICAL_FEATURES, FEATURE_COLUMNS, NUMERIC_FEATURES,
-    encode_splits, fit_encoders, get_X, get_X_y, get_y,
-)
+ROOT_DIR = Path(__file__).resolve().parent.parent
+if str(ROOT_DIR / "src") not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR / "src"))
+
+try:
+    from data_generator import generate_synthetic_orders
+    from preprocessing import (
+        CATEGORICAL_FEATURES, FEATURE_COLUMNS, NUMERIC_FEATURES,
+        encode_splits, fit_encoders, get_X, get_X_y, get_y,
+    )
+except ImportError:
+    from src.data_generator import generate_synthetic_orders
+    from src.preprocessing import (
+        CATEGORICAL_FEATURES, FEATURE_COLUMNS, NUMERIC_FEATURES,
+        encode_splits, fit_encoders, get_X, get_X_y, get_y,
+    )
 
 
 @pytest.fixture(scope="module")
@@ -26,7 +36,7 @@ def splits():
 def test_encode_splits_no_leakage(splits):
     """Encoders must be fit on train only — val/test must not raise."""
     train, val, test = splits
-    train_enc, val_enc, test_enc, encoders = encode_splits(train, val, test)
+    train_enc, val_enc, test_enc, _ = encode_splits(train, val, test)
     for col in CATEGORICAL_FEATURES:
         assert f"{col}_encoded" in train_enc.columns
         assert f"{col}_encoded" in val_enc.columns

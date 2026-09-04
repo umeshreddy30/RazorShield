@@ -1,11 +1,16 @@
 """Tests for predict.py — smoke tests for the inference pipeline."""
 import sys
-import json
-import pytest
 from pathlib import Path
+import pytest
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT_DIR / "src"))
+if str(ROOT_DIR / "src") not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR / "src"))
+
+try:
+    from predict import load_artifacts, score_order
+except ImportError:
+    from src.predict import load_artifacts, score_order
 
 MODELS_READY = (ROOT_DIR / "models" / "best_model.json").exists()
 
@@ -39,7 +44,6 @@ DEMO_ORDER = {
 
 @pytest.mark.skipif(not MODELS_READY, reason="Models not trained yet")
 def test_score_output_structure():
-    from predict import load_artifacts, score_order
     arts = load_artifacts()
     result = score_order(DEMO_ORDER, arts)
     assert "risk_score" in result
@@ -50,7 +54,6 @@ def test_score_output_structure():
 
 @pytest.mark.skipif(not MODELS_READY, reason="Models not trained yet")
 def test_score_ranges():
-    from predict import load_artifacts, score_order
     arts = load_artifacts()
     result = score_order(DEMO_ORDER, arts)
     assert 0 <= result["risk_score"] <= 100
@@ -61,7 +64,6 @@ def test_score_ranges():
 @pytest.mark.skipif(not MODELS_READY, reason="Models not trained yet")
 def test_demo_order_is_high_risk():
     """The canonical demo order (COD, 2 previous RTOs, bad address) should be HIGH or MEDIUM."""
-    from predict import load_artifacts, score_order
     arts = load_artifacts()
     result = score_order(DEMO_ORDER, arts)
     assert result["risk_level"] in ("HIGH", "MEDIUM")
@@ -69,8 +71,7 @@ def test_demo_order_is_high_risk():
 
 @pytest.mark.skipif(not MODELS_READY, reason="Models not trained yet")
 def test_low_risk_order():
-    """A clean UPI order with good history should score LOW."""
-    from predict import load_artifacts, score_order
+    """A clean UPI order with good history should score LOW or MEDIUM."""
     arts = load_artifacts()
     safe_order = {
         "order_value": 999.0, "num_items": 1,
