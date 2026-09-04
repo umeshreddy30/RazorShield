@@ -19,9 +19,11 @@ import AgentExecutionTerminal from '@/components/AgentExecutionTerminal';
 import FraudRingGraph from '@/components/FraudRingGraph';
 import RealTimeScoreFeed from '@/components/RealTimeScoreFeed';
 import Vision2FASimulator from '@/components/Vision2FASimulator';
+import ModelMetricsPanel from '@/components/ModelMetricsPanel';
+import { BarChart3 } from 'lucide-react';
 
 export default function RazorShieldCommandCenter() {
-  const [activeTab, setActiveTab] = useState<'AGENTS' | 'GRAPH' | 'FEED' | 'VISION'>('AGENTS');
+  const [activeTab, setActiveTab] = useState<'AGENTS' | 'GRAPH' | 'FEED' | 'VISION' | 'METRICS'>('AGENTS');
   const [latestSubgraph, setLatestSubgraph] = useState<any>(null);
   const [latestScenario, setLatestScenario] = useState<string>('SYNDICATE_ATTACK');
 
@@ -99,6 +101,19 @@ export default function RazorShieldCommandCenter() {
           </button>
 
           <button
+            onClick={() => setActiveTab('METRICS')}
+            className={`flex items-center space-x-2 py-3 px-4 text-xs font-semibold border-b-2 transition-all whitespace-nowrap ${
+              activeTab === 'METRICS'
+                ? 'border-emerald-500 text-emerald-400 bg-emerald-500/5'
+                : 'border-transparent text-slate-400 hover:text-slate-200 hover:border-slate-700'
+            }`}
+          >
+            <BarChart3 className="h-4 w-4" />
+            <span>📊 Model Evaluation & ROI</span>
+            <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-mono">TRACK 02</span>
+          </button>
+
+          <button
             onClick={() => setActiveTab('GRAPH')}
             className={`flex items-center space-x-2 py-3 px-4 text-xs font-semibold border-b-2 transition-all whitespace-nowrap ${
               activeTab === 'GRAPH'
@@ -145,6 +160,12 @@ export default function RazorShieldCommandCenter() {
         {activeTab === 'AGENTS' && (
           <div className="space-y-6">
             <AgentExecutionTerminal onInvestigationComplete={handleInvestigationComplete} />
+          </div>
+        )}
+
+        {activeTab === 'METRICS' && (
+          <div className="space-y-6">
+            <ModelMetricsPanel />
           </div>
         )}
 
