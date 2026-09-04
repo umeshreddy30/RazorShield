@@ -23,7 +23,7 @@ try:
             model=str(YUNET_PATH),
             config="",
             input_size=(320, 240),
-            score_threshold=0.35,
+            score_threshold=0.50,
             nms_threshold=0.3,
             top_k=1000
         )
@@ -31,7 +31,7 @@ try:
 except Exception as e:
     print(f"[VISION-INIT-WARN] YuNet detector failed to load: {e}")
 
-# 2. Initialize Cascade Classifiers Ensemble
+# 2. Initialize Cascade Classifiers Ensemble (Strict Fallback)
 cascades: Dict[str, cv2.CascadeClassifier] = {}
 cascade_files = [
     "haarcascade_frontalface_alt2.xml",
@@ -47,9 +47,6 @@ for xml_name in cascade_files:
             cascades[xml_name] = cv2.CascadeClassifier(str(xml_path))
         except Exception as e:
             print(f"[VISION-INIT-WARN] Cascade load error for {xml_name}: {e}")
-
-# Pre-create CLAHE equalizer for low-contrast/indoor lighting
-clahe_equalizer = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8))
 
 
 def generate_biometric_token(challenge_type: str = "LIVENESS_GESTURE_3STEP") -> str:
@@ -78,103 +75,83 @@ def decode_base64_image(image_data: str) -> Optional[np.ndarray]:
 
 def analyze_face_and_liveness(img_bgr: np.ndarray) -> Dict[str, Any]:
     """
-    Multi-tier robust face and landmark detection:
-    1. OpenCV YuNet Deep Neural Network (handles glasses, beards, tilted angles, varying light).
-    2. CLAHE-Enhanced Haar Cascade Ensemble (alt2, alt, default).
-    3. YCrCb Skin Chrominance + Laplacian Feature Texture Entropy fallback.
+    Strict Deep Learning & Landmark Validation:
+    1. Primary: OpenCV YuNet Deep Neural Network with score_threshold=0.50 + geometric landmark validation.
+       (Completely rejects curtains, walls, inanimate folds while reliably detecting real human faces).
+    2. Strict Fallback: Haar Cascade (minNeighbors=5, scaleFactor=1.1) WITH MANDATORY Eye Detection in upper face ROI.
     """
     h, w = img_bgr.shape[:2]
     
-    # Tier 1: YuNet Deep Learning Detector
+    # Tier 1: YuNet Deep Learning Neural Detector
     if yunet_detector is not None:
         try:
             yunet_detector.setInputSize((w, h))
             _, detections = yunet_detector.detect(img_bgr)
             if detections is not None and len(detections) > 0:
-                det = detections[0]
-                bx, by, bw, bh, score = det[0], det[1], det[2], det[3], det[14]
-                if score >= 0.32:
-                    fc_x = (bx + bw / 2.0) / w
-                    fc_y = (by + bh / 2.0) / h
-                    is_centered = bool((0.12 <= fc_x <= 0.88) and (0.08 <= fc_y <= 0.92))
-                    return {
-                        "face_detected": True,
-                        "method": "yunet_dnn",
-                        "confidence": round(float(score), 3),
-                        "is_centered": is_centered,
-                        "bbox": [int(bx), int(by), int(bw), int(bh)],
-                        "landmarks_count": 5
-                    }
+                for det in detections:
+                    score = float(det[14])
+                    if score >= 0.50:
+                        bx, by, bw, bh = det[0], det[1], det[2], det[3]
+                        re_x, re_y = det[4], det[5]  # right eye landmark
+                        le_x, le_y = det[6], det[7]  # left eye landmark
+
+                        # Geometric face validation
+                        eye_dist = np.sqrt((re_x - le_x) ** 2 + (re_y - le_y) ** 2)
+                        aspect_ratio = bh / max(1.0, bw)
+
+                        # Must have natural facial aspect ratio and distinct eye separation
+                        if 0.16 * bw <= eye_dist <= 0.72 * bw and 0.75 <= aspect_ratio <= 1.65:
+                            fc_x = (bx + bw / 2.0) / w
+                            fc_y = (by + bh / 2.0) / h
+                            is_centered = bool((0.12 <= fc_x <= 0.88) and (0.08 <= fc_y <= 0.92))
+                            return {
+                                "face_detected": True,
+                                "method": "yunet_dnn",
+                                "confidence": round(score, 3),
+                                "is_centered": is_centered,
+                                "bbox": [int(bx), int(by), int(bw), int(bh)],
+                                "landmarks_count": 5
+                            }
         except Exception as e:
             print(f"[VISION-DNN-WARN] YuNet inference note: {e}")
 
-    # Tier 2: CLAHE Enhanced Multi-Cascade Ensemble
+    # Tier 2: Strict Fallback Haar Cascade with Mandatory Eye Verification
     gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
-    try:
-        gray_clahe = clahe_equalizer.apply(gray)
-    except Exception:
-        gray_clahe = gray
-
     for c_name in ["haarcascade_frontalface_alt2.xml", "haarcascade_frontalface_alt.xml", "haarcascade_frontalface_default.xml"]:
         classifier = cascades.get(c_name)
         if classifier and not classifier.empty():
-            for g in [gray_clahe, gray]:
-                faces = classifier.detectMultiScale(
-                    g,
-                    scaleFactor=1.05,
-                    minNeighbors=2,
-                    minSize=(int(w * 0.08), int(h * 0.08))
-                )
-                if len(faces) > 0:
-                    (x, y, fw, fh) = faces[0]
-                    fc_x = (x + fw / 2.0) / w
-                    fc_y = (y + fh / 2.0) / h
-                    is_centered = bool((0.12 <= fc_x <= 0.88) and (0.08 <= fc_y <= 0.92))
-                    
-                    eye_count = 0
+            faces = classifier.detectMultiScale(
+                gray,
+                scaleFactor=1.1,
+                minNeighbors=5,
+                minSize=(int(w * 0.14), int(h * 0.14))
+            )
+            for (x, y, fw, fh) in faces:
+                aspect_ratio = fh / max(1.0, fw)
+                if 0.80 <= aspect_ratio <= 1.55:
+                    # Inanimate objects (curtains/cloth) never have eyes
+                    upper_roi = gray[y:y + int(fh * 0.6), x:x + fw]
+                    eyes = []
                     if "haarcascade_eye.xml" in cascades:
-                        eye_roi = g[y:y+fh, x:x+fw]
                         eyes = cascades["haarcascade_eye.xml"].detectMultiScale(
-                            eye_roi,
-                            scaleFactor=1.08,
-                            minNeighbors=2,
-                            minSize=(int(fw * 0.08), int(fh * 0.08))
+                            upper_roi,
+                            scaleFactor=1.1,
+                            minNeighbors=3,
+                            minSize=(int(fw * 0.10), int(fh * 0.10))
                         )
-                        eye_count = len(eyes)
-
-                    return {
-                        "face_detected": True,
-                        "method": f"haar_{c_name.split('.')[0]}",
-                        "confidence": 0.88,
-                        "is_centered": is_centered,
-                        "bbox": [int(x), int(y), int(fw), int(fh)],
-                        "landmarks_count": max(2, eye_count)
-                    }
-
-    # Tier 3: Skin Chrominance + Laplacian Feature Entropy (Distinguishes human from plain background)
-    ycrcb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2YCrCb)
-    cy, cx = h // 2, w // 2
-    crop_h, crop_w = int(h * 0.55), int(w * 0.45)
-    center_roi = ycrcb[max(0, cy - crop_h//2):min(h, cy + crop_h//2), max(0, cx - crop_w//2):min(w, cx + crop_w//2)]
-
-    if center_roi.shape[0] > 0 and center_roi.shape[1] > 0:
-        cr = center_roi[:, :, 1]
-        cb = center_roi[:, :, 2]
-        skin_mask = (cr >= 130) & (cr <= 175) & (cb >= 75) & (cb <= 130)
-        skin_pct = np.sum(skin_mask) / (center_roi.shape[0] * center_roi.shape[1])
-
-        gray_roi = gray[max(0, cy - crop_h//2):min(h, cy + crop_h//2), max(0, cx - crop_w//2):min(w, cx + crop_w//2)]
-        laplacian_var = float(cv2.Laplacian(gray_roi, cv2.CV_64F).var())
-
-        if skin_pct >= 0.22 and laplacian_var >= 40.0:
-            return {
-                "face_detected": True,
-                "method": "skin_texture_chrominance",
-                "confidence": round(float(skin_pct), 3),
-                "is_centered": True,
-                "bbox": [cx - crop_w // 2, cy - crop_h // 2, crop_w, crop_h],
-                "landmarks_count": 2
-            }
+                    
+                    if len(eyes) >= 1:
+                        fc_x = (x + fw / 2.0) / w
+                        fc_y = (y + fh / 2.0) / h
+                        is_centered = bool((0.12 <= fc_x <= 0.88) and (0.08 <= fc_y <= 0.92))
+                        return {
+                            "face_detected": True,
+                            "method": f"haar_{c_name.split('.')[0]}",
+                            "confidence": 0.85,
+                            "is_centered": is_centered,
+                            "bbox": [int(x), int(y), int(fw), int(fh)],
+                            "landmarks_count": int(len(eyes))
+                        }
 
     return {
         "face_detected": False,
@@ -189,7 +166,7 @@ def analyze_face_and_liveness(img_bgr: np.ndarray) -> Dict[str, Any]:
 def verify_client_liveness_signature(challenge_metrics: Dict[str, Any]) -> Dict[str, Any]:
     """
     Strict server-side validation of biometric challenge frames.
-    Evaluates client video frame pixels using multi-tier deep learning and ensemble vision.
+    Evaluates client video frame pixels using deep learning neural network.
     Rejects verification if no real human face is detected in the image.
     """
     start_time = time.perf_counter()
@@ -246,7 +223,7 @@ def verify_client_liveness_signature(challenge_metrics: Dict[str, Any]) -> Dict[
             "message": "Security Error: Could not decode camera frame."
         }
 
-    # 4. Multi-tier Face & Landmark Analysis
+    # 4. Strict Face & Landmark Analysis
     analysis = analyze_face_and_liveness(img)
 
     if not analysis["face_detected"]:
@@ -285,7 +262,7 @@ def verify_client_liveness_signature(challenge_metrics: Dict[str, Any]) -> Dict[
             "is_centered": analysis["is_centered"],
             "confidence": analysis["confidence"],
             "detector_used": analysis["method"],
-            "landmarks_verified": analysis["landmarks_count"],
+            "landmarks_verified": int(analysis["landmarks_count"]),
             "stage": 2,
             "latency_ms": duration_ms,
             "message": "Facial landmark and active eye liveness confirmed."
@@ -390,5 +367,6 @@ def run_opencv_liveness_check(timeout_seconds: float = 15.0) -> Dict[str, Any]:
         "camera_status": "HOST_OPENCV_VERIFIED",
         "message": "Host OpenCV vision verification passed."
     }
+
 
 
