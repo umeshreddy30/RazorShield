@@ -315,7 +315,7 @@ def _sidebar() -> str:
 
         page = st.radio(
             "Navigate",
-            ["📊 Overview", "🎯 Order Scorer", "📈 Evaluation", "💰 Business Impact"],
+            ["📊 Overview", "🎯 Order Scorer", "🤖 Agent Investigation", "📈 Evaluation", "💰 Business Impact"],
             label_visibility="collapsed",
         )
 
@@ -989,6 +989,9 @@ def main() -> None:
         except Exception as e:
             st.error(f"Could not load model: {e}")
 
+    elif page == "🤖 Agent Investigation":
+        _page_agent_investigation()
+
     elif page == "📈 Evaluation":
         _page_evaluation(metrics)
 
@@ -996,5 +999,173 @@ def main() -> None:
         _page_business(metrics, y_true, y_prob)
 
 
+# ---------------------------------------------------------------------------
+# Page 5 — Autonomous Multi-Agent Investigation
+# ---------------------------------------------------------------------------
+
+def _page_agent_investigation() -> None:
+    import asyncio
+    st.markdown("## 🤖 Autonomous Multi-Agent Fraud Investigation Mesh")
+    st.markdown(
+        "<p style='color:#64748b'>Powered by LangGraph multi-agent orchestration, MongoDB entity profiling, and real-time reasoning trails.</p>",
+        unsafe_allow_html=True
+    )
+
+    col_case, col_actions = st.columns([2, 1])
+
+    with col_case:
+        case_type = st.selectbox(
+            "Select Investigation Scenario Preset",
+            [
+                "🚨 High-Risk Syndicate Case (Shared IP/Device Cluster + Prior Chargeback)",
+                "✅ Trusted Platinum Customer Case (Clean Tenure + 0 Disputes)",
+                "⚠️ High-Velocity Anomaly Case (New Account + Rush Overnight Notes)",
+                "🛠️ Custom Transaction Input"
+            ]
+        )
+
+    if case_type.startswith("🚨"):
+        default_cust = "cust_88129"
+        default_amt = 48500.0
+        default_ip = "103.21.124.89"
+        default_dfp = "dfp_a7b29c011e4"
+        default_notes = "Urgent overnight rush dispatch, leave with reception desk"
+        default_vpn = True
+    elif case_type.startswith("✅"):
+        default_cust = "cust_trusted_01"
+        default_amt = 3200.0
+        default_ip = "49.207.210.12"
+        default_dfp = "dfp_mac_9921"
+        default_notes = "Standard residential delivery"
+        default_vpn = False
+    elif case_type.startswith("⚠️"):
+        default_cust = "cust_new_velocity_03"
+        default_amt = 24500.0
+        default_ip = "103.45.12.9"
+        default_dfp = "dfp_phone_001"
+        default_notes = "Urgent gift, please fast-track courier delivery"
+        default_vpn = True
+    else:
+        default_cust = "cust_custom_01"
+        default_amt = 15000.0
+        default_ip = "103.21.124.89"
+        default_dfp = "dfp_a7b29c011e4"
+        default_notes = "Urgent rush order"
+        default_vpn = False
+
+    with st.expander("📋 Inspect Case Payload & Entity Attributes", expanded=True):
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            customer_id = st.text_input("Customer ID", value=default_cust)
+            amount = st.number_input("Transaction Amount (₹)", value=default_amt, step=500.0)
+        with c2:
+            ip_address = st.text_input("IP Address", value=default_ip)
+            device_fp = st.text_input("Device Fingerprint", value=default_dfp)
+        with c3:
+            is_vpn = st.checkbox("VPN / Proxy Detected", value=default_vpn)
+            notes = st.text_input("Transaction Notes / Memos", value=default_notes)
+
+    if st.button("🚀 Launch Autonomous Multi-Agent Investigation", type="primary", use_container_width=True):
+        from backend.agents.workflow import execute_agent_investigation
+
+        progress_container = st.container()
+        with progress_container:
+            st.markdown("### 🛰️ Live Agent Reasoning Stream")
+            agent_log_placeholder = st.empty()
+
+        captured_frames = []
+
+        async def streamlit_stream_callback(frame: dict):
+            captured_frames.append(frame)
+            time.sleep(0.08)
+
+        payload = {
+            "transaction_id": f"txn_{int(time.time()*1000)}",
+            "merchant_id": "mer_razor_enterprise",
+            "customer_id": customer_id,
+            "amount": float(amount),
+            "account_age_days": 2.0 if is_vpn else 300.0,
+            "device_trust_score": 0.15 if is_vpn else 0.95,
+            "ip_velocity_1h": 5 if is_vpn else 1,
+            "txn_velocity_1h": 6 if is_vpn else 1,
+            "is_vpn_proxy": is_vpn,
+            "failed_attempts_24h": 3 if is_vpn else 0,
+            "billing_shipping_match": not is_vpn,
+            "customer_email": f"{customer_id}@example.com",
+            "ip_address": ip_address,
+            "device_fingerprint": device_fp,
+            "notes": notes
+        }
+
+        with st.spinner("🤖 Autonomous Agents analyzing MongoDB records, graph clusters & transaction telemetry..."):
+            try:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                result = loop.run_until_complete(
+                    execute_agent_investigation(
+                        transaction_id=payload["transaction_id"],
+                        customer_id=payload["customer_id"],
+                        merchant_id=payload["merchant_id"],
+                        transaction_data=payload,
+                        emit_callback=streamlit_stream_callback
+                    )
+                )
+                loop.close()
+            except Exception as e:
+                st.error(f"Investigation execution error: {e}")
+                return
+
+        # Render Agent Reasoning Timeline
+        for frame in captured_frames:
+            agent = frame.get("agent_name", "Agent")
+            ev_type = frame.get("event_type", "INFO")
+            thought = frame.get("thought", "")
+
+            if agent == "Supervisor":
+                st.info(f"🧠 **[Supervisor]** {thought}")
+            elif agent == "DataRetrievalAgent":
+                st.markdown(f"💾 **[Data Retrieval Agent (MongoDB)]** `{thought}`")
+                if frame.get("tool_output"):
+                    with st.expander("🔍 View MongoDB Customer Profile Record", expanded=False):
+                        st.json(frame["tool_output"])
+            elif agent == "GraphAgent":
+                st.warning(f"🕸️ **[Fraud Ring Graph Agent]** {thought}")
+                if frame.get("tool_output"):
+                    with st.expander("🔍 View Graph Entity Relationship Cluster", expanded=False):
+                        st.json(frame["tool_output"])
+            elif agent == "NLPAnalyzer":
+                st.markdown(f"📝 **[NLP Metadata Analyzer]** {thought}")
+            elif agent == "DecisionAgent" and ev_type == "DECISION_REACHED":
+                st.success(f"⚖️ **[Decision Engine]** {thought}")
+
+        st.markdown("---")
+        st.markdown("### 🏆 Final Autonomous Verdict & Case File")
+
+        res_col1, res_col2, res_col3 = st.columns(3)
+        with res_col1:
+            if result.verdict == "BLOCK":
+                st.markdown(f"<div style='background:rgba(239,68,68,0.15);border:2px solid #ef4444;border-radius:12px;padding:20px;text-align:center;'><h2 style='color:#ef4444;margin:0;'>🛑 {result.verdict}</h2><p style='color:#f87171;font-size:0.85rem;margin-top:4px;'>CRITICAL RISK INTERCEPTED</p></div>", unsafe_allow_html=True)
+            elif result.verdict == "TRIGGER_2FA":
+                st.markdown(f"<div style='background:rgba(245,158,11,0.15);border:2px solid #f59e0b;border-radius:12px;padding:20px;text-align:center;'><h2 style='color:#f59e0b;margin:0;'>⚠️ {result.verdict}</h2><p style='color:#fbbf24;font-size:0.85rem;margin-top:4px;'>LIVENESS CHALLENGE REQUIRED</p></div>", unsafe_allow_html=True)
+            else:
+                st.markdown(f"<div style='background:rgba(16,185,129,0.15);border:2px solid #10b981;border-radius:12px;padding:20px;text-align:center;'><h2 style='color:#10b981;margin:0;'>✅ {result.verdict}</h2><p style='color:#34d399;font-size:0.85rem;margin-top:4px;'>LOW RISK APPROVAL</p></div>", unsafe_allow_html=True)
+
+        with res_col2:
+            st.metric("Composite Risk Score", f"{result.composite_risk_score}/100")
+            st.metric("Agent Confidence", f"{int(result.confidence * 100)}%")
+
+        with res_col3:
+            st.metric("Investigation SLA Latency", f"{result.investigation_duration_ms} ms")
+            st.metric("Triggered Risk Flags", f"{len(result.flags)} flags")
+
+        st.markdown("#### 📜 Executive Rationale")
+        st.info(result.executive_summary)
+
+        st.markdown("#### 🛡️ Autonomous Enforcement Actions Dispatched")
+        for act in result.recommended_actions:
+            st.markdown(f"- ✅ **{act}**")
+
+
 if __name__ == "__main__":
     main()
+

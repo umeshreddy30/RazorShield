@@ -1,0 +1,9 @@
+{
+  "best_model": "logistic_regression",
+  "val_prauc": 0.5372,
+  "optimal_threshold": 0.15,
+  "cost_config": {
+    "rto_cost": 350,
+    "verification_cost": 30
+  }
+}

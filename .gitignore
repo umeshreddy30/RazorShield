@@ -15,19 +15,22 @@ build/
 venv/
 env/
 
-# Data — raw generated data (regenerate with data_generator.py)
+# Node / Next.js
+node_modules/
+frontend/node_modules/
+.next/
+frontend/.next/
+out/
+frontend/out/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Data — raw file excluded (large, regenerated); processed splits committed
 data/raw/*.csv
-data/processed/*.csv
 
-# Models — regenerate with train.py
-models/*.pkl
-models/*.json
-models/*.npy
-
-# Keep placeholder files
-!data/raw/.gitkeep
-!data/processed/.gitkeep
-!models/.gitkeep
+# Models — pre-trained artifacts ARE committed for instant cloud load
+# (no exclusions here — all .pkl, .json, .npy files are tracked)
 
 # Jupyter
 .ipynb_checkpoints/
