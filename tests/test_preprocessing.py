@@ -18,8 +18,8 @@ def splits():
     df = df.sort_values("order_timestamp").reset_index(drop=True)
     n = len(df)
     train = df.iloc[:int(n * 0.7)].copy()
-    val   = df.iloc[int(n * 0.7):int(n * 0.85)].copy()
-    test  = df.iloc[int(n * 0.85):].copy()
+    val = df.iloc[int(n * 0.7):int(n * 0.85)].copy()
+    test = df.iloc[int(n * 0.85):].copy()
     return train, val, test
 
 
@@ -27,7 +27,6 @@ def test_encode_splits_no_leakage(splits):
     """Encoders must be fit on train only — val/test must not raise."""
     train, val, test = splits
     train_enc, val_enc, test_enc, encoders = encode_splits(train, val, test)
-    # Encoders fitted on train — all splits must have encoded columns
     for col in CATEGORICAL_FEATURES:
         assert f"{col}_encoded" in train_enc.columns
         assert f"{col}_encoded" in val_enc.columns

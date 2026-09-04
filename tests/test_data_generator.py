@@ -34,7 +34,7 @@ def test_timestamps_sorted(df):
 
 def test_cod_higher_rto(df):
     """COD orders should have higher average RTO rate than prepaid."""
-    cod_rto  = df[df["is_cod"] == 1]["is_rto"].mean()
+    cod_rto = df[df["is_cod"] == 1]["is_rto"].mean()
     prep_rto = df[df["is_cod"] == 0]["is_rto"].mean()
     assert cod_rto > prep_rto, f"COD RTO ({cod_rto:.3f}) not > prepaid ({prep_rto:.3f})"
 
