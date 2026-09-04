@@ -12,6 +12,7 @@ import numpy as np
 
 from backend.agents.workflow import execute_agent_investigation, create_investigation_graph
 from backend.agents.state import InvestigationResult
+from backend.vision_liveness import run_opencv_liveness_check
 
 app = FastAPI(
     title="RazorShield Autonomous Multi-Agent Risk Intelligence API",
@@ -241,6 +242,19 @@ async def get_investigation_case(transaction_id: str):
     if transaction_id not in INVESTIGATION_CASES:
         raise HTTPException(status_code=404, detail="Investigation case not found")
     return INVESTIGATION_CASES[transaction_id]
+
+# ---------------------------------------------------------
+# 3. Vision 2FA & Liveness Endpoint (Feature 2)
+# ---------------------------------------------------------
+@app.post("/api/trigger-liveness")
+@app.post("/api/v1/trigger-liveness")
+async def trigger_liveness_endpoint():
+    """
+    Launches local OpenCV webcam window for biometric liveness & gesture check.
+    Runs non-blockingly via asyncio.to_thread on the host OS.
+    """
+    result = await asyncio.to_thread(run_opencv_liveness_check)
+    return result
 
 # ---------------------------------------------------------
 # 3. WebSockets Gateways
