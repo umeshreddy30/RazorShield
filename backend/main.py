@@ -12,7 +12,7 @@ import numpy as np
 
 from backend.agents.workflow import execute_agent_investigation, create_investigation_graph
 from backend.agents.state import InvestigationResult
-from backend.vision_liveness import run_opencv_liveness_check
+from backend.vision_liveness import run_opencv_liveness_check, verify_client_liveness_signature
 
 app = FastAPI(
     title="RazorShield Autonomous Multi-Agent Risk Intelligence API",
@@ -248,11 +248,14 @@ async def get_investigation_case(transaction_id: str):
 # ---------------------------------------------------------
 @app.post("/api/trigger-liveness")
 @app.post("/api/v1/trigger-liveness")
-async def trigger_liveness_endpoint():
+async def trigger_liveness_endpoint(payload: Optional[Dict[str, Any]] = None):
     """
-    Launches local OpenCV webcam window for biometric liveness & gesture check.
-    Runs non-blockingly via asyncio.to_thread on the host OS.
+    Validates biometric liveness challenge and issues signed cryptographic verification token.
+    Supports both client-side WebRTC camera challenge and host-native OpenCV execution.
     """
+    if payload and payload.get("source") == "client_biometric_challenge":
+        return verify_client_liveness_signature(payload)
+    
     result = await asyncio.to_thread(run_opencv_liveness_check)
     return result
 
